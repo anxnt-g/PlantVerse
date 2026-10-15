@@ -2072,7 +2072,16 @@ function draw(){
   }
 }
 
-function loop(){ t++; draw(); requestAnimationFrame(loop); } requestAnimationFrame(loop);
+let lastFrameTime = performance.now();
+function loop(now){
+  if(!Number.isFinite(now)) now = performance.now();
+  const dt = Math.min(0.1, Math.max(0, (now - lastFrameTime) / 1000));
+  lastFrameTime = now;
+  t += dt * 60; // Normalize animation clock to a 60-unit/sec baseline so motion stays smooth at 120/240/400Hz displays.
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
 
 /* ---------- Game Logic & Mechanics ---------- */
 function advanceFarm() {
@@ -2197,7 +2206,7 @@ function crossbreed() {
 
 /* ---------- Minigame Engine ---------- */
 const gCanvas = document.getElementById('gameCanvas'); const gctx = gCanvas.getContext('2d'); 
-let game = { running:false, score:0, timeLeft: 45, leafX:210, drops: [], frame: 0 };
+let game = { running:false, score:0, timeLeft:45, leafX:210, drops:[], lastTime:0, timerAcc:0, spawnTimer:0 };
 
 function resizeGameCanvas() { 
     const rect = gCanvas.getBoundingClientRect(); 
@@ -2213,31 +2222,41 @@ document.getElementById('openGameBtn').addEventListener('click', () => {
   document.getElementById('gameHud').classList.add('show'); 
   
   // Initialize Zen Game
-  game = { running:true, score:0, timeLeft: 45, leafX:210, drops: [], frame: 0 }; 
+  game = { running:true, score:0, timeLeft: 45, leafX:210, drops: [], lastTime: performance.now(), timerAcc: 0, spawnTimer: 0 }; 
   document.getElementById('gameLives').textContent = '🫧 Zen Mode'; // Replace lives with calm text
   progressQuest('volley'); 
   requestAnimationFrame(gameLoop); 
 });
 
-function gameLoop() {
-  if(!game.running) return; 
-  
-  // Draw semi-transparent background for a calming effect
-  gctx.clearRect(0,0,420,525); 
-  gctx.fillStyle = 'rgba(4,10,7,0.75)'; 
-  gctx.fillRect(0,0,420,525); 
+function gameLoop(now) {
+  if(!game.running) return;
+  if(!Number.isFinite(now)) now = performance.now();
+  if(!game.lastTime) game.lastTime = now;
+  const dt = Math.min(0.1, Math.max(0, (now - game.lastTime) / 1000));
+  game.lastTime = now;
+  const k = dt * 60; // normalize per-frame speeds to a 60-unit/sec baseline
 
-  // Manage Timer (Assuming approx 60 FPS)
-  game.frame++;
-  if (game.frame % 60 === 0) game.timeLeft--;
-  
-  // Randomly spawn gentle dewdrops
-  if (Math.random() < 0.04) {
-      game.drops.push({ 
-          x: 20 + Math.random() * 380, 
-          y: -20, 
-          speed: 1.2 + Math.random() * 1.5 
-      });
+  // Draw semi-transparent background for a calming effect
+  gctx.clearRect(0,0,420,525);
+  gctx.fillStyle = 'rgba(4,10,7,0.75)';
+  gctx.fillRect(0,0,420,525);
+
+  // Manage Timer (high-res, frame-rate independent)
+  game.timerAcc += dt;
+  while (game.timerAcc >= 1) {
+    game.timerAcc -= 1;
+    game.timeLeft--;
+  }
+
+  // Randomly spawn gentle dewdrops (2.4 per second)
+  game.spawnTimer += dt;
+  while (game.spawnTimer >= (1 / 2.4)) {
+    game.spawnTimer -= (1 / 2.4);
+    game.drops.push({
+      x: 20 + Math.random() * 380,
+      y: -20,
+      speed: 1.2 + Math.random() * 1.5
+    });
   }
 
   // Draw the Player's Leaf Basket
@@ -2247,53 +2266,52 @@ function gameLoop() {
 
   // Update and draw dewdrops
   for (let i = game.drops.length - 1; i >= 0; i--) {
-      let drop = game.drops[i];
-      drop.y += drop.speed;
-      
-      // Gentle Catch Logic (No penalty for missing)
-      if (drop.y > 475 && drop.y < 495 && Math.abs(drop.x - game.leafX) < 45) {
-          game.score += 5;
-          game.drops.splice(i, 1);
-          playChime([784 + Math.random()*200], 0.3); // Soft water-like ping
-          continue;
-      }
-      
-      // Remove drops that miss the leaf
-      if (drop.y > 530) {
-          game.drops.splice(i, 1);
-      } else {
-          // Draw the dewdrop
-          gctx.fillStyle = 'rgba(150, 220, 255, 0.9)';
-          gctx.beginPath(); 
-          gctx.arc(drop.x, drop.y, 6, 0, Math.PI * 2); 
-          gctx.fill();
-          gctx.fillStyle = '#ffffff'; // Little highlight
-          gctx.beginPath(); 
-          gctx.arc(drop.x - 2, drop.y - 2, 2, 0, Math.PI * 2); 
-          gctx.fill();
-      }
+    let drop = game.drops[i];
+    drop.y += drop.speed * k;
+
+    // Gentle Catch Logic (No penalty for missing)
+    if (drop.y > 475 && drop.y < 495 && Math.abs(drop.x - game.leafX) < 45) {
+      game.score += 5;
+      game.drops.splice(i, 1);
+      playChime([784 + Math.random()*200], 0.3);
+      continue;
+    }
+
+    // Remove drops that miss the leaf
+    if (drop.y > 530) {
+      game.drops.splice(i, 1);
+    } else {
+      gctx.fillStyle = 'rgba(150, 220, 255, 0.9)';
+      gctx.beginPath();
+      gctx.arc(drop.x, drop.y, 6, 0, Math.PI * 2);
+      gctx.fill();
+      gctx.fillStyle = '#ffffff';
+      gctx.beginPath();
+      gctx.arc(drop.x - 2, drop.y - 2, 2, 0, Math.PI * 2);
+      gctx.fill();
+    }
   }
 
   // Update HUD
-  document.getElementById('gameScore').textContent = 'Score: ' + game.score; 
-  document.getElementById('gameTimer').textContent = 'Time: ' + game.timeLeft + 's';
+  document.getElementById('gameScore').textContent = 'Score: ' + game.score;
+  document.getElementById('gameTimer').textContent = 'Time: ' + Math.max(0, game.timeLeft) + 's';
 
   // End Game gently when time runs out
   if (game.timeLeft <= 0) {
-    game.running = false; 
-    gCanvas.classList.remove('active'); 
-    document.getElementById('gameHud').classList.remove('show'); 
-    
-    const earned = Math.floor(game.score / 2); 
-    state.coins += earned; 
+    game.running = false;
+    gCanvas.classList.remove('active');
+    document.getElementById('gameHud').classList.remove('show');
+
+    const earned = Math.floor(game.score / 2);
+    state.coins += earned;
     state.totalCoinsEarned = (state.totalCoinsEarned || 0) + earned;
-    
-    say(`Zen time over! Earned ${earned} coins. 💧`); 
-    playChime([440, 523, 659]); 
-    checkAchievements(); 
-    renderUI(); 
-  } else { 
-      requestAnimationFrame(gameLoop); 
+
+    say('Zen time over! Earned ' + earned + ' coins. 💧');
+    playChime([440, 523, 659]);
+    checkAchievements();
+    renderUI();
+  } else {
+    requestAnimationFrame(gameLoop);
   }
 }
 
@@ -2608,25 +2626,37 @@ function startGardenRush(){
   if(!rushCtx) return;
   resizeRushCanvas();
   const r = rushCanvas.getBoundingClientRect();
-  rush={running:true,score:0,combo:0,time:30,frame:0,targets:[],sparks:[],lastSpawn:0};
+  rush={running:true,score:0,combo:0,time:30,targets:[],sparks:[],lastTime:performance.now(),timerAcc:0,spawnTimer:0,t:0};
   document.getElementById('rushScore').textContent='0';
   document.getElementById('rushCombo').textContent='0';
   document.getElementById('rushTime').textContent='30';
   requestAnimationFrame(rushLoop);
 }
-function rushLoop(){
+function rushLoop(now){
   if(!rush.running) return;
+  if(!Number.isFinite(now)) now=performance.now();
+  if(!rush.lastTime) rush.lastTime=now;
+  const dt=Math.min(0.1,Math.max(0,(now-rush.lastTime)/1000));
+  rush.lastTime=now;
+  const k=dt*60;
+  rush.t += k;
+
   const rect=rushCanvas.getBoundingClientRect(), w=rect.width, h=rect.height;
-  rush.frame++;
-  if(rush.frame%60===0){
+  rush.timerAcc += dt;
+  while(rush.timerAcc>=1){
+    rush.timerAcc-=1;
     rush.time--;
     document.getElementById('rushTime').textContent=rush.time;
   }
+
+  // spawn based on frames-at-60 normalization
+  rush.spawnTimer += k;
   const spawnEvery=Math.max(18, 38-rush.combo*1.2);
-  if(rush.frame-rush.lastSpawn>spawnEvery){
-    rush.lastSpawn=rush.frame;
+  if(rush.spawnTimer > spawnEvery){
+    rush.spawnTimer=0;
     spawnRushTarget(w,h);
   }
+
   rushCtx.clearRect(0,0,w,h);
   const bg=rushCtx.createLinearGradient(0,0,0,h);
   bg.addColorStop(0,'#0e251d'); bg.addColorStop(1,'#06100b');
@@ -2637,13 +2667,15 @@ function rushLoop(){
   for(let i=0;i<4;i++){
     rushCtx.fillStyle=i%2?'#9b8cff':'#7cf5c8';
     rushCtx.beginPath();
-    rushCtx.arc(w*(.15+i*.25), 80+Math.sin(rush.frame*.01+i)*35, 90, 0, Math.PI*2);
+    rushCtx.arc(w*(.15+i*.25), 80+Math.sin(rush.t*.01+i)*35, 90, 0, Math.PI*2);
     rushCtx.fill();
   }
   rushCtx.globalAlpha=1;
 
   for(let i=rush.targets.length-1;i>=0;i--){
-    const t=rush.targets[i]; t.life++; t.phase+=.08;
+    const t=rush.targets[i];
+    t.life += k;
+    t.phase += .08*k;
     const alpha=Math.max(0,1-t.life/t.max);
     if(t.life>t.max){rush.targets.splice(i,1); rush.combo=0; continue;}
     const rr=t.r+Math.sin(t.phase)*1.5;
@@ -2657,7 +2689,11 @@ function rushLoop(){
     rushCtx.globalAlpha=1;
   }
   for(let i=rush.sparks.length-1;i>=0;i--){
-    const s=rush.sparks[i]; s.x+=s.vx; s.y+=s.vy; s.vy+=.04; s.life--;
+    const s=rush.sparks[i];
+    s.x += s.vx*k;
+    s.y += s.vy*k;
+    s.vy += .04*k;
+    s.life -= k;
     rushCtx.globalAlpha=Math.max(0,s.life/25);
     rushCtx.fillStyle=s.golden?'#ffd76a':'#7cf5c8';
     rushCtx.fillRect(s.x,s.y,3,3);
