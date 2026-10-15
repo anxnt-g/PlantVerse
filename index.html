@@ -1119,6 +1119,8 @@ document.getElementById('bgmToggleBtn').addEventListener('click', toggleBGM);
 
 /* ---------- Rendering Engine Pipeline ---------- */
 const canvas = document.getElementById('scene'); const ctx = canvas.getContext('2d'); let t = 0;
+const TARGET_FPS = 400; // enhanced high-frame-rate target
+let lastDrawTime = performance.now(); let drawK = 1;
 /* ---------- Bloom / Glow Post-FX Layer ---------- */
 const bloomCanvas = document.createElement('canvas'); const bctx = bloomCanvas.getContext('2d');
 function resizeBloom(){ bloomCanvas.width = canvas.width; bloomCanvas.height = canvas.height; }
@@ -1143,7 +1145,7 @@ function burstSplash(x, y, color='rgba(150,220,255,0.9)', count=18) {
 }
 function drawSplashDrops() {
     for(let i=splashDrops.length-1; i>=0; i--){
-        const p = splashDrops[i]; p.vy += 0.28; p.x += p.vx; p.y += p.vy; p.life -= 0.02;
+        const p = splashDrops[i]; p.vy += 0.28*drawK; p.x += p.vx*drawK; p.y += p.vy*drawK; p.life -= 0.02*drawK;
         if(p.life <= 0) { splashDrops.splice(i,1); continue; }
         ctx.save(); ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill(); ctx.restore();
     }
@@ -1674,7 +1676,7 @@ function drawGardenBackground(env) {
   }
   if (state.weather === 'storm') {
       if(Math.random() < 0.02) { lightningFlash = 1; }
-      if(lightningFlash > 0) { ctx.fillStyle = `rgba(220, 230, 255, ${lightningFlash*0.55})`; ctx.fillRect(0,0,420,525); lightningFlash -= 0.12; }
+      if(lightningFlash > 0) { ctx.fillStyle = `rgba(220, 230, 255, ${lightningFlash*0.55})`; ctx.fillRect(0,0,420,525); lightningFlash -= 0.12 * drawK; }
       ctx.strokeStyle = 'rgba(200,220,255,0.35)'; ctx.lineWidth = 1.5;
       for(let i=0;i<25;i++){ let rx = (i*37 + (t*9)%420) % 460 - 20; ctx.beginPath(); ctx.moveTo(rx, -10); ctx.lineTo(rx-14, 340); ctx.stroke(); }
   }
@@ -2004,8 +2006,8 @@ function drawEcosystem() {
         
         for(let i=activeBees.length-1; i>=0; i--) {
             let b = activeBees[i]; 
-            b.x += (210 + Math.sin(t*0.02 + b.tOffset)*90 - b.x) * 0.012; 
-            b.y += (180 + Math.cos(t*0.03 + b.tOffset)*60 - b.y) * 0.012;
+            b.x += (210 + Math.sin(t*0.02 + b.tOffset)*90 - b.x) * (0.012*drawK); 
+            b.y += (180 + Math.cos(t*0.03 + b.tOffset)*60 - b.y) * (0.012*drawK);
             
             ctx.save(); ctx.translate(b.x, b.y); ctx.translate(0, Math.sin(t*0.2)*3);
             ctx.fillStyle = '#ffcc00'; ctx.beginPath(); ctx.ellipse(0,0, 6, 4.5, 0, 0, Math.PI*2); ctx.fill();
@@ -2045,10 +2047,13 @@ function drawPostProcessing(env) {
 
 /* Master Engine Loop with Safe Exception Catching */
 function draw(){
+  const _now = performance.now();
+  drawK = Math.min(6, Math.max(0.01, (_now - lastDrawTime) / (1000/60)));
+  lastDrawTime = _now;
   try {
     ctx.clearRect(0,0,420,525); 
-    state.gameHour = (state.gameHour + (24 / 10000)) % 24;
-    if(state.petZoomies > 0) state.petZoomies -= 0.016; 
+    state.gameHour = (state.gameHour + (24 / 10000) * drawK) % 24;
+    if(state.petZoomies > 0) state.petZoomies -= 0.016 * drawK; 
     const env = getEnvironmentColors();
     
     if (state.activeScene === 'terrarium') {
@@ -2353,10 +2358,12 @@ function burstConfetti(x=210, y=280, count=45) {
     const colors = ['#f4d58d','#9bcf86','#5bb2d0','#fa3792','#ffcc00','#ab3aab'];
     for(let i=0; i<count; i++){ confetti.push({ x, y, vx:(Math.random()-0.5)*8, vy:(Math.random()*-8)-3, r:Math.random()*4+2, color: colors[Math.floor(Math.random()*colors.length)], life:1, rot:Math.random()*Math.PI*2, vrot:(Math.random()-0.5)*0.3 }); }
 }
+let lastFxTime = performance.now(); let fxK = 1;
 function fxLoop() {
+    const _n=performance.now(); fxK=Math.min(6,Math.max(0.01,(_n-lastFxTime)/(1000/60))); lastFxTime=_n;
     fctx.clearRect(0,0,420,525);
     for(let i=confetti.length-1; i>=0; i--){
-        const p = confetti[i]; p.vy += 0.22; p.x += p.vx; p.y += p.vy; p.rot += p.vrot; p.life -= 0.012;
+        const p = confetti[i]; p.vy += 0.22*fxK; p.x += p.vx*fxK; p.y += p.vy*fxK; p.rot += p.vrot*fxK; p.life -= 0.012*fxK;
         if(p.life <= 0 || p.y > 560) { confetti.splice(i,1); continue; }
         fctx.save(); fctx.globalAlpha = Math.max(0, p.life); fctx.translate(p.x, p.y); fctx.rotate(p.rot); fctx.fillStyle = p.color; fctx.fillRect(-p.r, -p.r/2, p.r*2, p.r); fctx.restore();
     }
@@ -3000,7 +3007,7 @@ function drawLivingWorld(){
   // Wildlife
   for(let i=PV22.wildlife.length-1;i>=0;i--){
     const q=PV22.wildlife[i];
-    q.life++; q.x+=q.vx; q.y+=q.vy+Math.sin(t*.04+q.phase)*.12;
+    q.life += drawK; q.x+=q.vx*drawK; q.y+=q.vy*drawK+Math.sin(t*.04+q.phase)*.12*drawK;
     const fade=Math.min(1,(q.max-q.life)/30,q.life/20);
     if(q.life>q.max){PV22.wildlife.splice(i,1);continue;}
     livingCtx.globalAlpha=Math.max(0,fade);
@@ -3160,6 +3167,8 @@ function weatherBurst(type){
 function drawEnvironmentFX(){
   if(!envCtx||!envCanvas)return;
   const r=envCanvas.getBoundingClientRect(),w=r.width,h=r.height;
+  // access drawK-like scaling (environment uses independent rAF? called in draw, so drawK exists)
+  const ek = drawK;
   envCtx.clearRect(0,0,w,h);
 
   // Soft sunlight / moonlight beams
@@ -3177,9 +3186,9 @@ function drawEnvironmentFX(){
 
   for(let i=PV23.particles.length-1;i>=0;i--){
     const p=PV23.particles[i];
-    p.life++;p.x+=p.vx;p.y+=p.vy;
-    if(p.kind==='rain'||p.kind==='storm'){p.vy+=.025}
-    if(p.kind==='snow'){p.x+=Math.sin((p.life+p.x)*.03)*.22}
+    p.life += ek; p.x += p.vx*ek; p.y += p.vy*ek;
+    if(p.kind==='rain'||p.kind==='storm'){p.vy += .025*ek;}
+    if(p.kind==='snow'){p.x += Math.sin((p.life+p.x)*.03)*.22*ek;}
     if(p.life>p.max||p.y>h+20){PV23.particles.splice(i,1);continue}
     const a=Math.max(0,Math.min(1,p.life/15,(p.max-p.life)/20));
     envCtx.globalAlpha=a;
